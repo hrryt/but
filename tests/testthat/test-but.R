@@ -47,5 +47,7 @@ test_that(".wrap = FALSE avoids NSE pitfalls", {
 test_that(".out works", {
   slapply <- lapply |> but(.out |> simplify2array())
   x <- c(lapply(3:6, seq),list(c(NA,1)))
-  expect_equal(slapply(x, fivenum, na.rm = FALSE), sapply(x, fivenum, na.rm = FALSE))
+  expect_equal(slapply(x, fivenum, na.rm = FALSE), out <- sapply(x, fivenum, na.rm = FALSE))
+  fapply <- lapply |> but(FUN = fivenum, na.rm = FALSE, .out |> simplify2array())
+  expect_equal(fapply(x), out)
 })
