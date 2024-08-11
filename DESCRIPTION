@@ -14,3 +14,5 @@ RoxygenNote: 7.2.3
 Roxygen: list(markdown = TRUE)
 Authors@R: 
     person("Harry", "Thompson", , "harry@mayesfield.uk", role = c("cre", "aut"))
+URL: https://github.com/hrryt/but
+BugReports: https://github.com/hrryt/but/issues
