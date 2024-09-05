@@ -2,11 +2,11 @@
 % Please edit documentation in R/but-package.R
 \docType{package}
 \name{but-package}
-\alias{but}
 \alias{but-package}
-\title{but: Add Functionality to Functions}
+\alias{_PACKAGE}
+\title{but: Edit and Expand Existing Functions}
 \description{
-Create functions based on existing functions, but with modified formals or additional processing of their output.
+Create functions based on existing functions, but with modified formals or additional processing of their inputs or output.
 }
 \seealso{
 Useful links:

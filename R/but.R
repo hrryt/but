@@ -1,56 +1,78 @@
-#' Modify a Function's Formals or Output
+#' Modify a Function's Formals, Inputs and Output
 #'
 #' Constructs a function that calls the input function with modified formal arguments
-#' and/or additional processing of its output.
-#'
-#' Each named argument supplied to `but()` replaces the formal argument of `.f`
-#' with that name. Otherwise it is added to the end of the argument list and,
-#' if `.pass_all`, passed to `.f `.
+#' and optionally additional processing of its inputs and output.
 #'
 #' If `.f` is a primitive without a well-defined argument list, a warning is given,
 #' its formals are assumed to be `alist(... = )`, and `.first` is set to `TRUE`.
 #'
-#' If an argument supplied to `but()` 'references' `.out` (see examples),
-#' it is treated as a language object and appended to the body of the returned function
-#' after the call to `.f` is assigned to `.out`, such that the output of `.f`
-#' can be modified before it is returned.
+#' @section Named arguments:
+#'
+#' Each named argument supplied to `but()` replaces the formal argument of `.f`
+#' with that name, or if it is not present in the formals of `.f`,
+#' is added to the end of the argument list.
+#'
+#' A formal argument can be removed by quoting `.rm`, e.g. `but(.f, x = .rm)`.
+#'
+#' @section Unnamed arguments:
+#'
+#' Unnamed arguments supplied to `but()` are used as language objects
+#' to build the body of the returned function.
+#'
+#' If an unnamed argument references `.out`, e.g. `but(.f, g(.out))`,
+#' it is appended to the body after the call to `.f` is assigned to `.out`,
+#' such that the output of `.f` can be modified before it is returned.
+#'
+#' Otherwise, unnamed arguments are added to the body before the call to `.f`,
+#' for example so that arguments can be modified before being passed to `.f`.
 #'
 #' @param .f 	a function (a primitive or a closure, i.e., “non-primitive”)
-#' @param ... modified formals
+#' @param ... modified formals and instructions for pre- and post-processing
 #' @param .first should supplied formals come first, and in the order specified?
 #' @param .wrap should `.f` be wrapped in a new function or its formals modified directly?
 #' @param .pass_all should arguments not present in the formals of `.f` be passed to `.f`
 #' if it has [dots] to absorb them?
 #'
 #' @returns A function.
-#' @seealso [`|>`], [do()].
+#' @seealso [`|>`].
 #'
 #' @examples
-#' # supply default arguments to read.table
-#' read.csv |> but(stringsAsFactors = TRUE, strip.white = TRUE)
+#' max_rm <- max |> but(na.rm = TRUE)
+#' max_rm(0, NA, 2, 1)
+#' (x <- log(c(0, NA, 1)))
+#' min(x)
+#' min_inf <- min |> but(if(-Inf %in% c(...)) return(-Inf))
+#' min_inf(x)
+#'
+#' read.csv |> but(stringsAsFactors = TRUE, on.exit(unlink(file)))
+#'
+#' # remove arguments with .rm
+#' (square <- matrix |> but(
+#'   nrow = sqrt(length(data)), ncol = .rm, ncol <- nrow,
+#'   data = 0, data <- as.numeric(data)
+#' ))
+#' square(1:9, byrow = TRUE)
+#' square(TRUE, 3)
+#'
+#' aq <- transform(airquality, Month = factor(Month, labels = month.abb[5:9]))
+#' # an argument that references .out
+#' (subset_drop <- subset |> but(drop = TRUE, droplevels(.out)))
+#' table(subset     (aq, Month != "Jul")$Month)
+#' table(subset_drop(aq, Month != "Jul")$Month)
+#'
+#' # use .first to order arguments
+#' (start_repeats <- grepl |> but(
+#'   x = , n = 2, pattern = .rm, .first = TRUE,
+#'   pattern <- sprintf("^%s{%i}", substr(x, 1, 1), n)
+#' ))
+#' start_repeats("hhi", 3)
+#' start_repeats("Hhello", ignore.case = TRUE)
 #'
 #' `+` #primitive
 #' double <- `+` |> but(e2 = e1)
 #' double(4)
 #'
-#' start_repeats <- grepl |> but( #create new argument n
-#'   x = , n = 2, pattern = sprintf("^%s{%i}", substr(x, 1, 1), n),
-#'   .first = TRUE
-#' )
-#' start_repeats("hhi", 3)
-#' start_repeats("Hhello", ignore.case = TRUE)
-#'
-#' # an argument that references .out
-#' (slapply <- lapply |> but(.out |> simplify2array()))
-#' 3:9 |> slapply(seq) |> slapply(fivenum, na.rm = FALSE)
-#' cor_dist <- cor |> but({
-#'   dd <- as.dist((1 - .out)/2)
-#'   plot(hclust(dd))
-#'   dd
-#' })
-#' cor_dist(USJudgeRatings, method = "spearman") |> round(2)
-#'
-#' but(lm) # lm(weights = weights) will error if run
+#' but(lm) # lm(*, weights = weights) will error if run
 #' # use .wrap = FALSE to avoid the pitfalls of
 #' # non-standard evaluation in the body of .f
 #' lm_for_pipe <- lm |> but(data = , .first = TRUE, .wrap = FALSE)
@@ -58,10 +80,11 @@
 #'
 #' # use .pass_all = FALSE to avoid passing
 #' # extra arguments to the dots of .f
-#' outer |> but(
-#'   n = , X = seq_len(n), Y = X,
+#' (times_table <- outer |> but(
+#'   n = , X = .rm, Y = .rm, Y <- X <- seq_len(n),
 #'   .first = TRUE, .pass_all = FALSE
-#' ) |> print() |> do(4) |> print()
+#' ))
+#' times_table(4)
 #'
 #' (numbers <- seq(1, 3, 0.5))
 #' but(split, f = floor(x))(numbers) #equivalent to using pipe
@@ -73,15 +96,14 @@
 #'
 #' @export
 but <- function(.f, ..., .first = FALSE, .wrap = TRUE, .pass_all = TRUE) {
-  .f
+  .f <- match.fun(.f)
   use <- nzchar(names(d <- dots(match.call())))
-  has_out <- sum(out <- vapply(d, references_out, logical(1)))
+  has_out <- sum(out <- references_out(d))
+  r <- is_rm(d)
   stopifnot(
-    ".f must be a function" = is.function(.f),
-    "all arguments bar .f and .out must be named" = all(xor(out, use)),
-    ".wrap must be TRUE if .f is primitive" = !is.primitive(.f) || .wrap,
-    "at most one argument can reference .out" = has_out <= 1,
-    ".wrap must be TRUE if .out is referenced" = !has_out || .wrap
+    "any arguments that reference .out must not be named" = !any(out & use),
+    ".wrap must be TRUE if .f is primitive" = .wrap || !is.primitive(.f),
+    ".wrap must be TRUE if .out or .rm is referenced" = .wrap || !(has_out | any(r))
   )
   if(i <- is.null(a <- args(.f))) {
     warning(".f is a primitive without a well-defined argument list")
@@ -89,30 +111,6 @@ but <- function(.f, ..., .first = FALSE, .wrap = TRUE, .pass_all = TRUE) {
   }
   fn <- modify(fm <- args2formals(a, i), d[use], .first)
   if(!any(names(fm) == "...")) .pass_all <- FALSE
-  if(.wrap) wrapper(.f, fn, fm, .pass_all, out, has_out, d) else
+  if(.wrap) wrapper(.f, fn, fm, .pass_all, has_out, d, out, use | out, r) else
     `formals<-`(.f, value = fn)
-}
-
-dots <- function(m, f = sys.function(sys.parent())) {
-  as.list(m <- m[-1])[!names(m) %in% (n <- names(formals(f)))[n != "..."]]
-}
-args2formals <- function(a, i) {
-  if(i) alist(... = ) else if(is.null(fm <- formals(a))) list() else fm
-}
-modify <- function(fm, x, .first) {
-  fm[nx <- names(x)] <- x
-  if(.first) c(x, fm[!names(fm) %in% nx]) else fm
-}
-wrapper <- function(.f, fn, fm, .pass_all, out, has_out, d) {
-  bod <- f_call(names(if(.pass_all) fn else fm))
-  as.function(c(fn, bodify(bod, out, has_out, d)), list2env(list(.f = .f)))
-}
-f_call <- function(n) {
-  as.call(c(list(quote(.f)), `names<-`(lapply(n, as.symbol), `[<-`(n, n == "...", value = ""))))
-}
-references_out <- function(i) {
-  any(grepl(".out", i, fixed = TRUE))
-}
-bodify <- function(bod, out, has_out, d) {
-  if(has_out) call("{", call("<-", quote(.out), bod), d[out][[1]]) else bod
 }

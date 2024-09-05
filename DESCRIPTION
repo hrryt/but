@@ -1,17 +1,15 @@
 Package: but
 Type: Package
-Title: Add Functionality to Functions
+Title: Edit and Expand Existing Functions
 Version: 0.1.0
-Description: Create functions based on existing functions, but with modified formals or additional processing of their output.
+Description: Create functions based on existing functions, but with modified formals or additional processing of their inputs or output.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
-Suggests: 
-    testthat (>= 3.0.0)
+Suggests: testthat (>= 3.0.0)
 Config/testthat/edition: 3
 RoxygenNote: 7.2.3
 Roxygen: list(markdown = TRUE)
-Authors@R: 
-    person("Harry", "Thompson", , "harry@mayesfield.uk", role = c("cre", "aut"))
+Authors@R: person("Harry", "Thompson", email = "harry@mayesfield.uk", role = c("cre", "aut"))
 URL: https://github.com/hrryt/but
 BugReports: https://github.com/hrryt/but/issues
