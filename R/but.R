@@ -3,13 +3,21 @@
 #' Constructs a function that calls the input function with modified formal arguments
 #' and optionally additional processing of its inputs and output.
 #'
-#' If `.f` is a primitive without a well-defined argument list, a warning is given,
-#' its formals are assumed to be `alist(... = )`, and `.first` is set to `TRUE`.
+#' This documentation assumes `.f` is a function, but it can be a call, in which
+#' case `but` is applied to the function of the call before evaluation of the call.
+#' `but(f(x), y = x)` is equivalent to `but(f, y = x)(x)`.
+#'
+#' If `.f` is a primitive without a well-defined argument list,
+#' its formals are assumed to be `alist(... = )` and a warning is given.
+#'
+#' If `.nse` is `TRUE`, a call to `.f` is constructed from `match.call()`
+#' in the body of the returned function. This is useful if `.f` is, for example,
+#' a modelling function that captures its call and displays it when printing.
 #'
 #' @section Named arguments:
 #'
-#' Each named argument supplied to `but()` replaces the formal argument of `.f`
-#' with that name, or if it is not present in the formals of `.f`,
+#' Each named argument supplied to `but()` replaces the default value of the
+#' argument of `.f` with that name, or if it is not present in the formals of `.f`,
 #' is added to the end of the argument list.
 #'
 #' A formal argument can be removed by quoting `.rm`, e.g. `but(.f, x = .rm)`.
@@ -26,10 +34,17 @@
 #' Otherwise, unnamed arguments are added to the body before the call to `.f`,
 #' for example so that arguments can be modified before being passed to `.f`.
 #'
-#' @param .f 	a function (a primitive or a closure, i.e., “non-primitive”)
+#' The walrus operator `:=` can be used to modify the call to `.f` directly,
+#' regardless the value of `.nse`. For example, `but(.f, x := y)` might be
+#' equivalent to `function(...) .f(..., x = y)`.
+#'
+#' @param .f 	a function (a primitive or a closure, i.e., 'non-primitive')
 #' @param ... modified formals and instructions for pre- and post-processing
 #' @param .first should supplied formals come first, and in the order specified?
+#' @param .nse should the **n**on-**s**tandard **e**valuation of `.f` be accounted for
+#' using [match.call()]?
 #' @param .wrap should `.f` be wrapped in a new function or its formals modified directly?
+#' @param .store should `.f` be stored in the environment of the returned function?
 #' @param .pass_all should arguments not present in the formals of `.f` be passed to `.f`
 #' if it has [dots] to absorb them?
 #'
@@ -37,80 +52,129 @@
 #' @seealso [`|>`].
 #'
 #' @examples
-#' max_rm <- max |> but(na.rm = TRUE)
+#' # named arguments specify default values to change
+#' (max_rm <- max |> but(na.rm = TRUE))
 #' max_rm(0, NA, 2, 1)
 #' (x <- log(c(0, NA, 1)))
 #' min(x)
-#' min_inf <- min |> but(if(-Inf %in% c(...)) return(-Inf))
+#' # unnamed arguments are added to the body of the returned function
+#' (min_inf <- min |> but(if(-Inf %in% c(...)) return(-Inf)))
 #' min_inf(x)
+#' # applying but directly to a call saves dealing with the intermediate function
+#' min(x) |> but(if(-Inf %in% c(...)) return(-Inf))
 #'
-#' read.csv |> but(stringsAsFactors = TRUE, on.exit(unlink(file)))
+#' args(lm)
+#' # leaving data's value missing ensures there is no default value
+#' # .first = TRUE puts data to the front of the argument list
+#' (lm4pipe <- lm |> but(data = , .first = TRUE))
+#' # non-standard evaluation in the body of lm makes wrapping difficult
+#' try(mtcars |> subset(cyl == 4) |> lm4pipe(mpg ~ disp))
+#' # use .wrap = FALSE to modify the formals of lm directly instead
+#' lm4pipe <- lm |> but(data = , .first = TRUE, .wrap = FALSE)
+#' mtcars |> subset(cyl == 4) |> lm4pipe(mpg ~ disp)
 #'
-#' # remove arguments with .rm
-#' (square <- matrix |> but(
-#'   nrow = sqrt(length(data)), ncol = .rm, ncol <- nrow,
-#'   data = 0, data <- as.numeric(data)
+#' resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = FALSE]
+#' # wrapping that respects lm's NSE can be achieved with .nse = TRUE
+#' # this allows the use of := to specify what the call to lm should look like
+#' (lm4pipe_resample <- lm |> but(
+#'   data = , .first = TRUE, .nse = TRUE,
+#'   data := resampled_data, resampled_data <- resample(data)
 #' ))
+#' mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
+#'
+#' (m <- diag(4))
+#' m[2, ] # `[` defaults to drop = TRUE
+#' # .store = TRUE ensures the initial `[` function is stored as .f
+#' (`[` <- `[` |> but(drop = FALSE, .store = TRUE))
+#' environment(`[`)$.f
+#' m[2, ] # `[` now defaults to drop = FALSE
+#' m[2, , drop = TRUE]
+#' rm(`[`)
+#'
+#' (none <- Negate(any))
+#' # unnamed arguments that reference .out are added after the call to .f
+#' (none <- any |> but(!.out))
+#' strsplit |> but(.out[[1]])
+#' subset |> but(drop = TRUE, droplevels(.out))
+#' # use on.exit() if post-processing does not reference .out
+#' read.csv |> but(on.exit(unlink(file)))
+#'
+#' # use .rm to remove arguments
+#' (square <- matrix |> but(ncol = .rm, ncol <- nrow, nrow = sqrt(length(data))))
+#' # use := to modify the call directly
+#' (square <- matrix |> but(ncol = .rm, ncol := nrow, nrow = sqrt(length(data))))
 #' square(1:9, byrow = TRUE)
-#' square(TRUE, 3)
+#' square(1, 3)
 #'
-#' aq <- transform(airquality, Month = factor(Month, labels = month.abb[5:9]))
-#' # an argument that references .out
-#' (subset_drop <- subset |> but(drop = TRUE, droplevels(.out)))
-#' table(subset     (aq, Month != "Jul")$Month)
-#' table(subset_drop(aq, Month != "Jul")$Month)
-#'
-#' # use .first to order arguments
-#' (start_repeats <- grepl |> but(
-#'   x = , n = 2, pattern = .rm, .first = TRUE,
-#'   pattern <- sprintf("^%s{%i}", substr(x, 1, 1), n)
-#' ))
-#' start_repeats("hhi", 3)
-#' start_repeats("Hhello", ignore.case = TRUE)
-#'
-#' `+` #primitive
-#' double <- `+` |> but(e2 = e1)
-#' double(4)
-#'
-#' but(lm) # lm(*, weights = weights) will error if run
-#' # use .wrap = FALSE to avoid the pitfalls of
-#' # non-standard evaluation in the body of .f
-#' lm_for_pipe <- lm |> but(data = , .first = TRUE, .wrap = FALSE)
-#' mtcars |> subset(cyl == 4) |> lm_for_pipe(mpg ~ disp)
-#'
+#' # use := .rm to remove arguments from the call
+#' read.csv |> but(
+#'   keep.white = TRUE, strip.white := !keep.white, keep.white := .rm
+#' )
 #' # use .pass_all = FALSE to avoid passing
 #' # extra arguments to the dots of .f
-#' (times_table <- outer |> but(
-#'   n = , X = .rm, Y = .rm, Y <- X <- seq_len(n),
-#'   .first = TRUE, .pass_all = FALSE
-#' ))
-#' times_table(4)
+#' read.csv |> but(
+#'   keep.white = TRUE, strip.white := !keep.white, .pass_all = FALSE
+#' )
 #'
-#' (numbers <- seq(1, 3, 0.5))
-#' but(split, f = floor(x))(numbers) #equivalent to using pipe
-#'
-#' #dangerous; see warning
-#' `last<-` <- but(`[[<-`, x = , i = length(x), value = )
-#' last(numbers) <- 0
-#' numbers
+#' (cb1 <- cbind |> but(`:=`(, 1))) # := missing first argument
+#' cb1(1:6, 1:2)
 #'
 #' @export
-but <- function(.f, ..., .first = FALSE, .wrap = TRUE, .pass_all = TRUE) {
+but <- function(.f, ..., .first = FALSE, .nse = FALSE,
+                .wrap = TRUE, .store = FALSE, .pass_all = TRUE) {
+  s <- substitute(.f)
+  is_call <- is.call(s)
+  if(is_call) .f <- s[[1]]
+  .q <- if(.store) quote(.f) else substitute(.f)
   .f <- match.fun(.f)
-  use <- nzchar(names(d <- dots(match.call())))
-  has_out <- sum(out <- references_out(d))
+  named <- nzchar(names(d <- dots(match.call())))
+  has_out <- any(out <- references_out(d))
+  has_walri <- any(walrus <- is_walrus_call(d))
   r <- is_rm(d)
   stopifnot(
-    "any arguments that reference .out must not be named" = !any(out & use),
     ".wrap must be TRUE if .f is primitive" = .wrap || !is.primitive(.f),
-    ".wrap must be TRUE if .out or .rm is referenced" = .wrap || !(has_out | any(r))
+    ".wrap must be TRUE if unnamed arguments are provided" = .wrap || all(named),
+    "arguments that reference .out must be unnamed" = all(!named | !out)
   )
-  if(i <- is.null(a <- args(.f))) {
+  if(.nse && !.wrap) warning(".wrap is FALSE, ignoring .nse")
+  if(i <- is.null(a <- args(.f)))
     warning(".f is a primitive without a well-defined argument list")
-    .first <- TRUE
-  }
-  fn <- modify(fm <- args2formals(a, i), d[use], .first)
+  fn <- modify(fm <- args2formals(a, i), d[named], .first)
+  fn_rmd <- fn[!names(fn) %in% names(d)[r]]
   if(!any(names(fm) == "...")) .pass_all <- FALSE
-  if(.wrap) wrapper(.f, fn, fm, .pass_all, has_out, d, out, use | out, r) else
-    `formals<-`(.f, value = fn)
+  .f <- if(.wrap) {
+    .r <- walrus_list(d[walrus])
+    di <- d[!(named | out | walrus)]
+    env <- new.env(parent = parent.frame())
+    if(.nse) {
+      stopifnot(
+        "first argument of every `:=` operation must be specified if .nse is TRUE" =
+          all(nzchar(names(.r)))
+      )
+      di <- c(di, list(quote(.m <- match.call())))
+      env$.q <- .q
+      fcall <- quote(eval(.m))
+      if(has_walri) {
+        di <- c(di, list(quote(.m[names(.r)] <- .r)))
+        .d <- is_rm(.r)
+        env$.r <- if(any(.d)) {
+          di <- c(di, list(quote(.m[.d] <- NULL)))
+          env$.d <- names(.r)[.d]
+          .r[!.d]
+        } else .r
+      }
+      di <- c(di, list(quote(.m[[1]] <- .q)))
+    } else fcall <- f_call(.q, names(if(.pass_all) fn else fm), .r)
+    bod <- bodify(fcall, has_out, d[out], di)
+    if(.store) env$.f <- .f
+    as.function(c(fn_rmd, bod), env)
+  } else {
+    if(any(r)) warning("removing arguments is dangerous when .wrap is FALSE")
+    `formals<-`(.f, value = fn_rmd)
+  }
+  if(is_call) {
+    s[[1]] <- quote(.f)
+    return(eval(s, envir = list(.f = .f), enclos = parent.frame()))
+  }
+  .f
 }

@@ -4,16 +4,29 @@
 \alias{but}
 \title{Modify a Function's Formals, Inputs and Output}
 \usage{
-but(.f, ..., .first = FALSE, .wrap = TRUE, .pass_all = TRUE)
+but(
+  .f,
+  ...,
+  .first = FALSE,
+  .nse = FALSE,
+  .wrap = TRUE,
+  .store = FALSE,
+  .pass_all = TRUE
+)
 }
 \arguments{
-\item{.f}{a function (a primitive or a closure, i.e., “non-primitive”)}
+\item{.f}{a function (a primitive or a closure, i.e., 'non-primitive')}
 
 \item{...}{modified formals and instructions for pre- and post-processing}
 
 \item{.first}{should supplied formals come first, and in the order specified?}
 
+\item{.nse}{should the \strong{n}on-\strong{s}tandard \strong{e}valuation of \code{.f} be accounted for
+using \code{\link[=match.call]{match.call()}}?}
+
 \item{.wrap}{should \code{.f} be wrapped in a new function or its formals modified directly?}
+
+\item{.store}{should \code{.f} be stored in the environment of the returned function?}
 
 \item{.pass_all}{should arguments not present in the formals of \code{.f} be passed to \code{.f}
 if it has \link{dots} to absorb them?}
@@ -26,14 +39,22 @@ Constructs a function that calls the input function with modified formal argumen
 and optionally additional processing of its inputs and output.
 }
 \details{
-If \code{.f} is a primitive without a well-defined argument list, a warning is given,
-its formals are assumed to be \code{alist(... = )}, and \code{.first} is set to \code{TRUE}.
+This documentation assumes \code{.f} is a function, but it can be a call, in which
+case \code{but} is applied to the function of the call before evaluation of the call.
+\code{but(f(x), y = x)} is equivalent to \code{but(f, y = x)(x)}.
+
+If \code{.f} is a primitive without a well-defined argument list,
+its formals are assumed to be \code{alist(... = )} and a warning is given.
+
+If \code{.nse} is \code{TRUE}, a call to \code{.f} is constructed from \code{match.call()}
+in the body of the returned function. This is useful if \code{.f} is, for example,
+a modelling function that captures its call and displays it when printing.
 }
 \section{Named arguments}{
 
 
-Each named argument supplied to \code{but()} replaces the formal argument of \code{.f}
-with that name, or if it is not present in the formals of \code{.f},
+Each named argument supplied to \code{but()} replaces the default value of the
+argument of \code{.f} with that name, or if it is not present in the formals of \code{.f},
 is added to the end of the argument list.
 
 A formal argument can be removed by quoting \code{.rm}, e.g. \code{but(.f, x = .rm)}.
@@ -51,65 +72,79 @@ such that the output of \code{.f} can be modified before it is returned.
 
 Otherwise, unnamed arguments are added to the body before the call to \code{.f},
 for example so that arguments can be modified before being passed to \code{.f}.
+
+The walrus operator \verb{:=} can be used to modify the call to \code{.f} directly,
+regardless the value of \code{.nse}. For example, \code{but(.f, x := y)} might be
+equivalent to \code{function(...) .f(..., x = y)}.
 }
 
 \examples{
-max_rm <- max |> but(na.rm = TRUE)
+# named arguments specify default values to change
+(max_rm <- max |> but(na.rm = TRUE))
 max_rm(0, NA, 2, 1)
 (x <- log(c(0, NA, 1)))
 min(x)
-min_inf <- min |> but(if(-Inf \%in\% c(...)) return(-Inf))
+# unnamed arguments are added to the body of the returned function
+(min_inf <- min |> but(if(-Inf \%in\% c(...)) return(-Inf)))
 min_inf(x)
+# applying but directly to a call saves dealing with the intermediate function
+min(x) |> but(if(-Inf \%in\% c(...)) return(-Inf))
 
-read.csv |> but(stringsAsFactors = TRUE, on.exit(unlink(file)))
+args(lm)
+# leaving data's value missing ensures there is no default value
+# .first = TRUE puts data to the front of the argument list
+(lm4pipe <- lm |> but(data = , .first = TRUE))
+# non-standard evaluation in the body of lm makes wrapping difficult
+try(mtcars |> subset(cyl == 4) |> lm4pipe(mpg ~ disp))
+# use .wrap = FALSE to modify the formals of lm directly instead
+lm4pipe <- lm |> but(data = , .first = TRUE, .wrap = FALSE)
+mtcars |> subset(cyl == 4) |> lm4pipe(mpg ~ disp)
 
-# remove arguments with .rm
-(square <- matrix |> but(
-  nrow = sqrt(length(data)), ncol = .rm, ncol <- nrow,
-  data = 0, data <- as.numeric(data)
+resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = FALSE]
+# wrapping that respects lm's NSE can be achieved with .nse = TRUE
+# this allows the use of := to specify what the call to lm should look like
+(lm4pipe_resample <- lm |> but(
+  data = , .first = TRUE, .nse = TRUE,
+  data := resampled_data, resampled_data <- resample(data)
 ))
+mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
+
+(m <- diag(4))
+m[2, ] # `[` defaults to drop = TRUE
+# .store = TRUE ensures the initial `[` function is stored as .f
+(`[` <- `[` |> but(drop = FALSE, .store = TRUE))
+environment(`[`)$.f
+m[2, ] # `[` now defaults to drop = FALSE
+m[2, , drop = TRUE]
+rm(`[`)
+
+(none <- Negate(any))
+# unnamed arguments that reference .out are added after the call to .f
+(none <- any |> but(!.out))
+strsplit |> but(.out[[1]])
+subset |> but(drop = TRUE, droplevels(.out))
+# use on.exit() if post-processing does not reference .out
+read.csv |> but(on.exit(unlink(file)))
+
+# use .rm to remove arguments
+(square <- matrix |> but(ncol = .rm, ncol <- nrow, nrow = sqrt(length(data))))
+# use := to modify the call directly
+(square <- matrix |> but(ncol = .rm, ncol := nrow, nrow = sqrt(length(data))))
 square(1:9, byrow = TRUE)
-square(TRUE, 3)
+square(1, 3)
 
-aq <- transform(airquality, Month = factor(Month, labels = month.abb[5:9]))
-# an argument that references .out
-(subset_drop <- subset |> but(drop = TRUE, droplevels(.out)))
-table(subset     (aq, Month != "Jul")$Month)
-table(subset_drop(aq, Month != "Jul")$Month)
-
-# use .first to order arguments
-(start_repeats <- grepl |> but(
-  x = , n = 2, pattern = .rm, .first = TRUE,
-  pattern <- sprintf("^\%s{\%i}", substr(x, 1, 1), n)
-))
-start_repeats("hhi", 3)
-start_repeats("Hhello", ignore.case = TRUE)
-
-`+` #primitive
-double <- `+` |> but(e2 = e1)
-double(4)
-
-but(lm) # lm(*, weights = weights) will error if run
-# use .wrap = FALSE to avoid the pitfalls of
-# non-standard evaluation in the body of .f
-lm_for_pipe <- lm |> but(data = , .first = TRUE, .wrap = FALSE)
-mtcars |> subset(cyl == 4) |> lm_for_pipe(mpg ~ disp)
-
+# use := .rm to remove arguments from the call
+read.csv |> but(
+  keep.white = TRUE, strip.white := !keep.white, keep.white := .rm
+)
 # use .pass_all = FALSE to avoid passing
 # extra arguments to the dots of .f
-(times_table <- outer |> but(
-  n = , X = .rm, Y = .rm, Y <- X <- seq_len(n),
-  .first = TRUE, .pass_all = FALSE
-))
-times_table(4)
+read.csv |> but(
+  keep.white = TRUE, strip.white := !keep.white, .pass_all = FALSE
+)
 
-(numbers <- seq(1, 3, 0.5))
-but(split, f = floor(x))(numbers) #equivalent to using pipe
-
-#dangerous; see warning
-`last<-` <- but(`[[<-`, x = , i = length(x), value = )
-last(numbers) <- 0
-numbers
+(cb1 <- cbind |> but(`:=`(, 1))) # := missing first argument
+cb1(1:6, 1:2)
 
 }
 \seealso{

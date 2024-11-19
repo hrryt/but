@@ -8,16 +8,21 @@ modify <- function(fm, x, .first) {
   fm[nx <- names(x)] <- x
   if(.first) c(x, fm[!names(fm) %in% nx]) else fm
 }
-wrapper <- function(.f, fn, fm, .pass_all, has_out, d, o, i, r) {
-  bod <- bodify(f_call(names(if(.pass_all) fn else fm)), has_out, d[o], d[!i])
-  as.function(c(fn[!names(fn) %in% names(d)[r]], bod), list2env(list(.f = .f)))
+f_call <- function(.q, n, .r) {
+  n <- `names<-`(lapply(n, as.symbol), `[<-`(n, n == "...", value = ""))
+  .d <- is_rm(.r)
+  keep <- .r[!.d]
+  n[names(keep)] <- keep
+  n[names(.r)[.d]] <- NULL
+  as.call(c(list(.q), n))
 }
-f_call <- function(n) {
-  as.call(c(list(quote(.f)), `names<-`(lapply(n, as.symbol), `[<-`(n, n == "...", value = ""))))
-}
-r_out <- function(i) any(grepl("out", i, fixed = TRUE))
-references_out <- function(d) vapply(d, r_out, logical(1))
-is_rm <- function(d) vapply(d, identical, logical(1), quote(.rm))
 bodify <- function(bod, has_out, o, i) {
   as.call(c(quote(`{`), c(i, if(has_out) list(call("<-", quote(.out), bod)) else bod, o)))
 }
+
+r_out <- function(i) ".out" %in% all.vars(i)
+w_call <- function(i) is.call(i) && i[[1]] == quote(`:=`)
+is_rm <- function(d) vapply(d, identical, logical(1), quote(.rm), USE.NAMES = FALSE)
+references_out <- function(d) vapply(d, r_out, logical(1), USE.NAMES = FALSE)
+is_walrus_call <- function(d) vapply(d, w_call, logical(1), USE.NAMES = FALSE)
+walrus_list <- function(w) `names<-`(lapply(w, `[[`, 3), lapply(w, `[[`, 2))

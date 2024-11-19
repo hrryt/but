@@ -24,27 +24,62 @@ devtools::install_github("hrryt/but")
 
 ``` r
 library(but)
+```
 
+Use named arguments to change the default values of a function.
+
+``` r
 max_rm <- max |> but(na.rm = TRUE)
 max_rm(0, NA, 2, 1)
 #> [1] 2
+```
+
+`but` can act on calls as well as functions.
+
+Use unnamed arguments to preprocess inputs.
+
+``` r
 (x <- log(c(0, NA, 1)))
 #> [1] -Inf   NA    0
 min(x)
 #> [1] NA
+min(x) |> but(if(-Inf %in% c(...)) return(-Inf))
+#> [1] -Inf
 min_inf <- min |> but(if(-Inf %in% c(...)) return(-Inf))
 min_inf(x)
 #> [1] -Inf
+```
+
+Reference `.out` to modify the output of a function.
+
+Use `on.exit()` to clean up after a function call.
+
+``` r
+(strsplit1 <- strsplit |> but(.out[[1]]))
+#> function (x, split, fixed = FALSE, perl = FALSE, useBytes = FALSE) 
+#> {
+#>     .out <- strsplit(x = x, split = split, fixed = fixed, perl = perl, 
+#>         useBytes = useBytes)
+#>     .out[[1]]
+#> }
+#> <environment: 0x0000017c7d795d48>
+strsplit1("a.b.c", ".", fixed = TRUE)
+#> [1] "a" "b" "c"
 read.csv |> but(stringsAsFactors = TRUE, on.exit(unlink(file)))
 #> function (file, header = TRUE, sep = ",", quote = "\"", dec = ".", 
 #>     fill = TRUE, comment.char = "", ..., stringsAsFactors = TRUE) 
 #> {
 #>     on.exit(unlink(file))
-#>     .f(file = file, header = header, sep = sep, quote = quote, 
+#>     read.csv(file = file, header = header, sep = sep, quote = quote, 
 #>         dec = dec, fill = fill, comment.char = comment.char, 
 #>         ..., stringsAsFactors = stringsAsFactors)
 #> }
-#> <environment: 0x000001ce6fea0e38>
+#> <environment: 0x0000017c7d879a08>
+```
+
+Make `data` the first argument so it can be piped in.
+
+``` r
 args(lm)
 #> function (formula, data, subset, weights, na.action, method = "qr", 
 #>     model = TRUE, x = FALSE, y = FALSE, qr = TRUE, singular.ok = TRUE, 
@@ -64,43 +99,75 @@ mtcars |> subset(cyl == 4) |> lm4pipe(mpg ~ disp)
 #> Coefficients:
 #> (Intercept)         disp  
 #>     40.8720      -0.1351
-(square <- matrix |> but(
-  nrow = sqrt(length(data)), ncol = .rm, ncol <- nrow,
-  data = 0, data <- as.numeric(data)
+```
+
+Specify exactly what the call to `lm()` should look like with `:=`.
+
+``` r
+resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = FALSE]
+(lm4pipe_resample <- lm |> but(
+  data = , .first = TRUE, .nse = TRUE,
+  data := resampled_data, resampled_data <- resample(data)
 ))
-#> function (data = 0, nrow = sqrt(length(data)), byrow = FALSE, 
+#> function (data, formula, subset, weights, na.action, method = "qr", 
+#>     model = TRUE, x = FALSE, y = FALSE, qr = TRUE, singular.ok = TRUE, 
+#>     contrasts = NULL, offset, ...) 
+#> {
+#>     resampled_data <- resample(data)
+#>     .m <- match.call()
+#>     .m[names(.r)] <- .r
+#>     .m[[1]] <- .q
+#>     eval(.m)
+#> }
+#> <environment: 0x0000017c7cc9f9c8>
+mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
+#> 
+#> Call:
+#> lm(formula = mpg ~ disp, data = resampled_data)
+#> 
+#> Coefficients:
+#> (Intercept)         disp  
+#>     46.1153      -0.1977
+```
+
+Change the default value of `drop` in `[`.
+
+``` r
+(m <- diag(4))
+#>      [,1] [,2] [,3] [,4]
+#> [1,]    1    0    0    0
+#> [2,]    0    1    0    0
+#> [3,]    0    0    1    0
+#> [4,]    0    0    0    1
+m[2, ]
+#> [1] 0 1 0 0
+`[` <- `[` |> but(drop = FALSE, .store = TRUE)
+#> Warning in but(`[`, drop = FALSE, .store = TRUE): .f is a primitive without a
+#> well-defined argument list
+m[2, ]
+#>      [,1] [,2] [,3] [,4]
+#> [1,]    0    1    0    0
+m[2, , drop = TRUE]
+#> [1] 0 1 0 0
+rm(`[`)
+```
+
+Remove unwanted arguments with `.rm`.
+
+Modify the call directly with `:=`.
+
+``` r
+(square <- matrix |> but(nrow = sqrt(length(data)), ncol = .rm, ncol := nrow))
+#> function (data = NA, nrow = sqrt(length(data)), byrow = FALSE, 
 #>     dimnames = NULL) 
 #> {
-#>     ncol <- nrow
-#>     data <- as.numeric(data)
-#>     .f(data = data, nrow = nrow, ncol = ncol, byrow = byrow, 
+#>     matrix(data = data, nrow = nrow, ncol = nrow, byrow = byrow, 
 #>         dimnames = dimnames)
 #> }
-#> <environment: 0x000001ce704f9820>
+#> <environment: 0x0000017c7df073a8>
 square(1:9, byrow = TRUE)
 #>      [,1] [,2] [,3]
 #> [1,]    1    2    3
 #> [2,]    4    5    6
 #> [3,]    7    8    9
-square(TRUE, 3)
-#>      [,1] [,2] [,3]
-#> [1,]    1    1    1
-#> [2,]    1    1    1
-#> [3,]    1    1    1
-aq <- transform(airquality, Month = factor(Month, labels = month.abb[5:9]))
-(subset_drop <- subset |> but(drop = TRUE, droplevels(.out)))
-#> function (x, ..., drop = TRUE) 
-#> {
-#>     .out <- .f(x = x, ..., drop = drop)
-#>     droplevels(.out)
-#> }
-#> <environment: 0x000001ce6ebbcb38>
-table(subset     (aq, Month != "Jul")$Month)
-#> 
-#> May Jun Jul Aug Sep 
-#>  31  30   0  31  30
-table(subset_drop(aq, Month != "Jul")$Month)
-#> 
-#> May Jun Aug Sep 
-#>  31  30  31  30
 ```

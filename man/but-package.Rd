@@ -3,7 +3,6 @@
 \docType{package}
 \name{but-package}
 \alias{but-package}
-\alias{_PACKAGE}
 \title{but: Edit and Expand Existing Functions}
 \description{
 Create functions based on existing functions, but with modified formals or additional processing of their inputs or output.

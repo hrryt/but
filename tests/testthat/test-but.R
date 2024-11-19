@@ -23,11 +23,11 @@ test_that("missings are respected", {
   miss <- but(missing)
   expect_true(miss())
   expect_false(miss(NULL))
-  expect_error(but(matrix, data =)(), "argument \"data\" is missing, with no default")
+  expect_error(matrix() |> but(data = ), "argument \"data\" is missing, with no default")
 })
 test_that("primitives without a well-defined argument list work with warning", {
   expect_warning(
-    `last<-` <- but(`[[<-`, x = , i = length(x), value = ),
+    `last<-` <- but(`[[<-`, x = , i = length(x), value = , .first = TRUE),
     ".f is a primitive without a well-defined argument list"
   )
   y <- 1:3
@@ -36,7 +36,10 @@ test_that("primitives without a well-defined argument list work with warning", {
 })
 test_that(".wrap = FALSE avoids NSE pitfalls", {
   lm_for_pipe <- lm |> but(data =, .first = TRUE, .wrap = FALSE)
-  expect_s3_class(mtcars |> subset(cyl == 4) |> lm_for_pipe(mpg ~ disp), "lm")
+  expect_equal(
+    (mtcars |> lm_for_pipe(mpg~disp))$call,
+    quote(lm_for_pipe(data = mtcars, formula = mpg ~ disp))
+  )
 })
 test_that(".out works", {
   slapply <- lapply |> but(.out |> simplify2array())
@@ -49,14 +52,15 @@ test_that("multiple .outs work", {
   mat <- matrix |> but(.out[is.na(.out)] <- replacement, replacement = 0, .out)
   expect_equal(mat(c(1, NA), 2, 3), matrix(c(1, 0), 2, 3))
 })
-test_that(".out and .rm error without .wrap", {
-  error <- ".wrap must be TRUE if .out or .rm is referenced"
-  expect_error(but(matrix, ncol = .rm, .wrap = FALSE), error)
-  expect_error(but(matrix, data = 0, .out |> as.dist(), .wrap = FALSE), error)
+test_that("unnamed arguments error without .wrap", {
+  expect_error(
+    but(matrix, data = 0, .out |> as.dist(), .wrap = FALSE),
+    ".wrap must be TRUE if unnamed arguments are provided"
+  )
 })
 test_that(".out errors if named", {
   expect_error(
-    but(matrix, out = as.dist(.out)), "any arguments that reference .out must not be named"
+    but(matrix, out = as.dist(.out)), "arguments that reference .out must be unnamed"
   )
 })
 test_that("unnamed arguments are inserted before the call to .f", {
@@ -65,4 +69,72 @@ test_that("unnamed arguments are inserted before the call to .f", {
   )
   expect_equal(square(1:9, byrow = TRUE), matrix(1:9, 3, 3, byrow = TRUE))
   expect_equal(square(TRUE, 3), matrix(1, 3, 3))
+})
+test_that(".nse avoids NSE pitfalls", {
+  resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = TRUE]
+  lmx <- lm |> but(data = , .first = TRUE)
+  lm2 <- lm |> but(data = , .first = TRUE, .nse = TRUE)
+  lm3 <- lm |> but(data = , .first = TRUE, .nse = TRUE, data := resample(data))
+  lm4 <- lm |> but(data = , .first = TRUE, .nse = TRUE, data := resampled_data,
+                   resampled_data <- resample(data))
+  expect_error(lmx(mtcars, mpg~disp))
+  mt <- resample(mtcars)
+  expect_equal(lm2(mt, mpg~disp)$call, quote(lm(formula = mpg ~ disp, data = mt)))
+  expect_equal(lm3(mtcars, mpg~disp)$call, quote(lm(formula = mpg ~ disp, data = resample(data))))
+  expect_equal(lm4(mtcars, mpg~disp)$call, quote(lm(formula = mpg ~ disp, data = resampled_data)))
+})
+test_that(".nse works with .out", {
+  resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = TRUE]
+  lmcall <- lm |> but(data = , .first = TRUE, .nse = TRUE, data := resampled_data,
+                   resampled_data <- resample(data), .out$call)
+  expect_equal(lmcall(mtcars, mpg~disp), quote(lm(formula = mpg ~ disp, data = resampled_data)))
+})
+test_that(".nse works with .store", {
+  resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = TRUE]
+  lmf <- lm |> but(data = , .first = TRUE, .nse = TRUE, data := resampled_data,
+                   resampled_data <- resample(data), .store = TRUE)
+  expect_equal(lmf(mtcars, mpg~disp)$call, quote(.f(formula = mpg ~ disp, data = resampled_data)))
+})
+test_that("user-defined functions are found", {
+  get_first <- function(x) x[1]
+  mat <- matrix |> but(data <- get_first(data))
+  expect_equal(mat(1:3), matrix(1))
+})
+test_that(".nse warns without .wrap", {
+  expect_warning(but(lm, .wrap = FALSE, .nse = TRUE), ".wrap is FALSE, ignoring .nse")
+})
+test_that("unnamed arguments error without .wrap", {
+  expect_error(but(lm, .wrap = FALSE, .out$call), ".wrap must be TRUE if unnamed arguments are provided")
+})
+test_that(".rm warns without .wrap", {
+  expect_warning(
+    mat <- matrix |> but(nrow = .rm, .wrap = FALSE),
+    "removing arguments is dangerous when .wrap is FALSE"
+  )
+  expect_error(mat(), "did not find an argument")
+})
+test_that("walri with .rm work without .nse", {
+  expect_equal(max(NA, na.rm = TRUE) |> but(na.rm := .rm), NA_integer_)
+})
+test_that("walri with .rm work with .nse", {
+  expect_equal(max(NA, na.rm = TRUE) |> but(na.rm := .rm, .nse = TRUE), NA_integer_)
+})
+test_that("walri with no RHS work", {
+  expect_equal(quote() |> but(`:=`(expr, )), quote(expr=))
+})
+test_that("unnamed walri error with .nse", {
+  expect_error(
+    but(lm, .nse = TRUE, `:=`(, x)),
+    "first argument of every `:=` operation must be specified if .nse is TRUE"
+  )
+  expect_equal(c(0) |> but(`:=`(, 1)), c(0, 1))
+})
+test_that("but works with calls", {
+  x <- c(0, -Inf)
+  expect_equal(min(NA, x) |> but(if(-Inf %in% c(...)) return(-Inf)), -Inf)
+  resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = TRUE]
+  model <- lm(mtcars, mpg~disp) |> but(
+    data = , .first = TRUE, .nse = TRUE, data := resample(data)
+  )
+  expect_equal(model$call, quote(lm(formula = mpg ~ disp, data = resample(data))))
 })
