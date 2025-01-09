@@ -42,7 +42,7 @@ max_rm <- max |> but(na.rm = TRUE)
 max_rm(0, NA, 2, 1)
 ```
 
-`but` can act on calls as well as functions.
+`but()` can act on calls as well as functions.
 
 Use unnamed arguments to preprocess inputs.
 ```{r}
@@ -62,7 +62,7 @@ strsplit1("a.b.c", ".", fixed = TRUE)
 read.csv |> but(stringsAsFactors = TRUE, on.exit(unlink(file)))
 ```
 
-Make `data` the first argument so it can be piped in.
+Make `data` the first argument of `lm()` so it can be piped in.
 ```{r}
 args(lm)
 lm4pipe <- lm |> but(data = , .first = TRUE, .wrap = FALSE)
@@ -71,12 +71,17 @@ mtcars |> subset(cyl == 4) |> lm4pipe(mpg ~ disp)
 ```
 
 Specify exactly what the call to `lm()` should look like with `:=`.
+
+This process supports data masking with `rlang`.
 ```{r}
 resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = FALSE]
-(lm4pipe_resample <- lm |> but(
+lm_resample <- lm |> but(data := resample({{data}}), .nse = TRUE)
+lm_resample(mpg ~ disp, subset(mtcars, cyl == 4))$call
+
+lm4pipe_resample <- lm |> but(
   data = , .first = TRUE, .nse = TRUE,
   data := resampled_data, resampled_data <- resample(data)
-))
+)
 mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
 ```
 
@@ -90,7 +95,6 @@ m[2, , drop = TRUE]
 rm(`[`)
 ```
 
-
 Remove unwanted arguments with `.rm`.
 
 Modify the call directly with `:=`.
@@ -98,3 +102,5 @@ Modify the call directly with `:=`.
 (square <- matrix |> but(nrow = sqrt(length(data)), ncol = .rm, ncol := nrow))
 square(1:9, byrow = TRUE)
 ```
+
+See `?but` for more information and examples.

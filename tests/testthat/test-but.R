@@ -77,11 +77,19 @@ test_that(".nse avoids NSE pitfalls", {
   lm3 <- lm |> but(data = , .first = TRUE, .nse = TRUE, data := resample(data))
   lm4 <- lm |> but(data = , .first = TRUE, .nse = TRUE, data := resampled_data,
                    resampled_data <- resample(data))
+  lm5 <- lm |> but(data =, .first = TRUE, .nse = TRUE, data := resample({{data}}))
+  lm6 <- lm |> but(data =, .first = TRUE, .nse = TRUE, data := resample2({{data}}),
+                   resample2 <- resample)
   expect_error(lmx(mtcars, mpg~disp))
   mt <- resample(mtcars)
   expect_equal(lm2(mt, mpg~disp)$call, quote(lm(formula = mpg ~ disp, data = mt)))
   expect_equal(lm3(mtcars, mpg~disp)$call, quote(lm(formula = mpg ~ disp, data = resample(data))))
   expect_equal(lm4(mtcars, mpg~disp)$call, quote(lm(formula = mpg ~ disp, data = resampled_data)))
+  mcall <- quote(lm(formula = mpg ~ disp, data = resample(quosure)))
+  mcall[[3]][[2]] <- rlang::quo(subset(mtcars, cyl == 4))
+  expect_equal((mtcars |> subset(cyl == 4) |> lm5(mpg ~ disp))$call, mcall)
+  mcall[[3]][[1]] <- quote(resample2)
+  expect_equal((mtcars |> subset(cyl == 4) |> lm6(mpg ~ disp))$call, mcall)
 })
 test_that(".nse works with .out", {
   resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = TRUE]
@@ -118,6 +126,7 @@ test_that("walri with .rm work without .nse", {
 })
 test_that("walri with .rm work with .nse", {
   expect_equal(max(NA, na.rm = TRUE) |> but(na.rm := .rm, .nse = TRUE), NA_integer_)
+  expect_equal(max(NA, na.rm = TRUE) |> but(na.rm := .rm, a := 1, .nse = TRUE), NA_integer_)
 })
 test_that("walri with no RHS work", {
   expect_equal(quote() |> but(`:=`(expr, )), quote(expr=))
@@ -137,4 +146,7 @@ test_that("but works with calls", {
     data = , .first = TRUE, .nse = TRUE, data := resample(data)
   )
   expect_equal(model$call, quote(lm(formula = mpg ~ disp, data = resample(data))))
+})
+test_that("missing .f errors", {
+  expect_error(but(), "argument \".f\" is missing, with no default")
 })

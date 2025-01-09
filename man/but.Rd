@@ -40,7 +40,7 @@ and optionally additional processing of its inputs and output.
 }
 \details{
 This documentation assumes \code{.f} is a function, but it can be a call, in which
-case \code{but} is applied to the function of the call before evaluation of the call.
+case \code{but()} is applied to the function of the call before evaluation of the call.
 \code{but(f(x), y = x)} is equivalent to \code{but(f, y = x)(x)}.
 
 If \code{.f} is a primitive without a well-defined argument list,
@@ -75,7 +75,8 @@ for example so that arguments can be modified before being passed to \code{.f}.
 
 The walrus operator \verb{:=} can be used to modify the call to \code{.f} directly,
 regardless the value of \code{.nse}. For example, \code{but(.f, x := y)} might be
-equivalent to \code{function(...) .f(..., x = y)}.
+equivalent to \code{function(...) .f(..., x = y)}. This accepts data masking
+if \code{.nse} is \code{TRUE}.
 }
 
 \examples{
@@ -108,6 +109,9 @@ resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = FALSE]
   data := resampled_data, resampled_data <- resample(data)
 ))
 mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
+# the RHS of := also accepts data masking
+lm_resample <- lm |> but(data := resample({{data}}), .nse = TRUE)
+lm_resample(mpg ~ disp, subset(mtcars, cyl == 4))
 
 (m <- diag(4))
 m[2, ] # `[` defaults to drop = TRUE

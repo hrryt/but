@@ -34,7 +34,7 @@ max_rm(0, NA, 2, 1)
 #> [1] 2
 ```
 
-`but` can act on calls as well as functions.
+`but()` can act on calls as well as functions.
 
 Use unnamed arguments to preprocess inputs.
 
@@ -62,7 +62,7 @@ Use `on.exit()` to clean up after a function call.
 #>         useBytes = useBytes)
 #>     .out[[1]]
 #> }
-#> <environment: 0x0000017c7d795d48>
+#> <environment: 0x60a950035998>
 strsplit1("a.b.c", ".", fixed = TRUE)
 #> [1] "a" "b" "c"
 read.csv |> but(stringsAsFactors = TRUE, on.exit(unlink(file)))
@@ -74,10 +74,10 @@ read.csv |> but(stringsAsFactors = TRUE, on.exit(unlink(file)))
 #>         dec = dec, fill = fill, comment.char = comment.char, 
 #>         ..., stringsAsFactors = stringsAsFactors)
 #> }
-#> <environment: 0x0000017c7d879a08>
+#> <environment: 0x60a9501d68c8>
 ```
 
-Make `data` the first argument so it can be piped in.
+Make `data` the first argument of `lm()` so it can be piped in.
 
 ``` r
 args(lm)
@@ -103,23 +103,19 @@ mtcars |> subset(cyl == 4) |> lm4pipe(mpg ~ disp)
 
 Specify exactly what the call to `lm()` should look like with `:=`.
 
+This process supports data masking with `rlang`.
+
 ``` r
 resample <- function(x) x[sample(nrow(x), replace = TRUE), , drop = FALSE]
-(lm4pipe_resample <- lm |> but(
+lm_resample <- lm |> but(data := resample({{data}}), .nse = TRUE)
+lm_resample(mpg ~ disp, subset(mtcars, cyl == 4))$call
+#> lm(formula = mpg ~ disp, data = resample(~subset(mtcars, cyl == 
+#>     4)))
+
+lm4pipe_resample <- lm |> but(
   data = , .first = TRUE, .nse = TRUE,
   data := resampled_data, resampled_data <- resample(data)
-))
-#> function (data, formula, subset, weights, na.action, method = "qr", 
-#>     model = TRUE, x = FALSE, y = FALSE, qr = TRUE, singular.ok = TRUE, 
-#>     contrasts = NULL, offset, ...) 
-#> {
-#>     resampled_data <- resample(data)
-#>     .m <- match.call()
-#>     .m[names(.r)] <- .r
-#>     .m[[1]] <- .q
-#>     eval(.m)
-#> }
-#> <environment: 0x0000017c7cc9f9c8>
+)
 mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
 #> 
 #> Call:
@@ -127,7 +123,7 @@ mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
 #> 
 #> Coefficients:
 #> (Intercept)         disp  
-#>     46.1153      -0.1977
+#>     43.4341      -0.1621
 ```
 
 Change the default value of `drop` in `[`.
@@ -164,10 +160,12 @@ Modify the call directly with `:=`.
 #>     matrix(data = data, nrow = nrow, ncol = nrow, byrow = byrow, 
 #>         dimnames = dimnames)
 #> }
-#> <environment: 0x0000017c7df073a8>
+#> <environment: 0x60a9509d16b0>
 square(1:9, byrow = TRUE)
 #>      [,1] [,2] [,3]
 #> [1,]    1    2    3
 #> [2,]    4    5    6
 #> [3,]    7    8    9
 ```
+
+See `?but` for more information and examples.

@@ -4,7 +4,7 @@
 #' and optionally additional processing of its inputs and output.
 #'
 #' This documentation assumes `.f` is a function, but it can be a call, in which
-#' case `but` is applied to the function of the call before evaluation of the call.
+#' case `but()` is applied to the function of the call before evaluation of the call.
 #' `but(f(x), y = x)` is equivalent to `but(f, y = x)(x)`.
 #'
 #' If `.f` is a primitive without a well-defined argument list,
@@ -36,7 +36,8 @@
 #'
 #' The walrus operator `:=` can be used to modify the call to `.f` directly,
 #' regardless the value of `.nse`. For example, `but(.f, x := y)` might be
-#' equivalent to `function(...) .f(..., x = y)`.
+#' equivalent to `function(...) .f(..., x = y)`. This accepts data masking
+#' if `.nse` is `TRUE`.
 #'
 #' @param .f 	a function (a primitive or a closure, i.e., 'non-primitive')
 #' @param ... modified formals and instructions for pre- and post-processing
@@ -81,6 +82,9 @@
 #'   data := resampled_data, resampled_data <- resample(data)
 #' ))
 #' mtcars |> subset(cyl == 4) |> lm4pipe_resample(mpg ~ disp)
+#' # the RHS of := also accepts data masking
+#' lm_resample <- lm |> but(data := resample({{data}}), .nse = TRUE)
+#' lm_resample(mpg ~ disp, subset(mtcars, cyl == 4))
 #'
 #' (m <- diag(4))
 #' m[2, ] # `[` defaults to drop = TRUE
@@ -122,6 +126,7 @@
 #' @export
 but <- function(.f, ..., .first = FALSE, .nse = FALSE,
                 .wrap = TRUE, .store = FALSE, .pass_all = TRUE) {
+  if(missing(.f)) force(.f)
   s <- substitute(.f)
   is_call <- is.call(s)
   if(is_call) .f <- s[[1]]
@@ -153,15 +158,19 @@ but <- function(.f, ..., .first = FALSE, .nse = FALSE,
       )
       di <- c(di, list(quote(.m <- match.call())))
       env$.q <- .q
-      fcall <- quote(eval(.m))
+      fcall <- quote(rlang::eval_tidy(.m))
       if(has_walri) {
-        di <- c(di, list(quote(.m[names(.r)] <- .r)))
         .d <- is_rm(.r)
-        env$.r <- if(any(.d)) {
+        .da <- any(.d)
+        if(!all(.d)) {
+          di <- c(di, list(quote(.r <- do.call(rlang::exprs, .r))))
+          di <- c(di, list(quote(.m[names(.r)] <- .r)))
+          env$.r <- if(.da) .r[!.d] else .r
+        }
+        if(.da) {
           di <- c(di, list(quote(.m[.d] <- NULL)))
           env$.d <- names(.r)[.d]
-          .r[!.d]
-        } else .r
+        }
       }
       di <- c(di, list(quote(.m[[1]] <- .q)))
     } else fcall <- f_call(.q, names(if(.pass_all) fn else fm), .r)
